@@ -17,7 +17,7 @@ import {
 } from 'lucide-react'
 
 const Layout = () => {
-    const { signOut, user } = useAuth()
+    const { signOut, user, userProfile } = useAuth()
     const location = useLocation()
 
     const navItems = [
@@ -92,7 +92,14 @@ const Layout = () => {
                             <User size={18} />
                         </div>
                         <div style={{ overflow: 'hidden' }}>
-                            <p style={{ margin: 0, fontSize: '0.9rem', fontWeight: 500, whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{user?.email}</p>
+                            <p style={{ margin: 0, fontSize: '0.9rem', fontWeight: 500, whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+                                {userProfile?.first_name || userProfile?.last_name
+                                    ? `${userProfile.first_name || ''} ${userProfile.last_name || ''}`.trim()
+                                    : user?.email}
+                            </p>
+                            {(userProfile?.first_name || userProfile?.last_name) && (
+                                <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)' }}>{user?.email}</p>
+                            )}
                         </div>
                     </div>
                     <button

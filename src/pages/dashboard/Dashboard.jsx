@@ -2,58 +2,97 @@ import React, { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import Card from '../../components/ui/Card'
-import { TrendingUp, TrendingDown, DollarSign, Calendar } from 'lucide-react'
+import { TrendingUp, TrendingDown, DollarSign } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 
 const Dashboard = () => {
     const { user } = useAuth()
+    const [loading, setLoading] = useState(true)
     const [stats, setStats] = useState({
         income: 0,
         expenses: 0,
-        balance: 0,
-        monthlyBudget: 2000 // Mock default
+        balance: 0
     })
     const [recentTransactions, setRecentTransactions] = useState([])
+    const [activityData, setActivityData] = useState([])
 
-    // NOTE: This will fail until Supabase tables are created. 
-    // We will handle errors gracefully to show UI.
     useEffect(() => {
         const fetchData = async () => {
             if (!user) return
 
             try {
-                // Mocking data fetching for MVP display if DB is empty/missing
-                // In real app: Fetch from 'transactions' table
+                // 1. Fetch All Transactions for Stats
+                const { data: allTx, error: statsError } = await supabase
+                    .from('transactions')
+                    .select('amount, type, date')
+                    .eq('user_id', user.id)
 
-                // Simulating data
-                setStats({
-                    income: 4500,
-                    expenses: 1250,
-                    balance: 3250,
-                    monthlyBudget: 3000
+                if (statsError) throw statsError
+
+                // Calculate Stats
+                let totalIncome = 0
+                let totalExpenses = 0
+
+                // For Activity Chart (Last 7 Days)
+                const last7Days = [...Array(7)].map((_, i) => {
+                    const d = new Date()
+                    d.setDate(d.getDate() - (6 - i))
+                    return d.toISOString().split('T')[0]
                 })
 
-                setRecentTransactions([
-                    { id: 1, title: 'Freelance Project', amount: 1200, type: 'income', date: '2023-11-01' },
-                    { id: 2, title: 'Grocery', amount: 150, type: 'expense', date: '2023-11-02' },
-                    { id: 3, title: 'Netflix', amount: 15, type: 'expense', date: '2023-11-03' },
-                ])
+                const dailyActivity = last7Days.reduce((acc, date) => {
+                    acc[date] = 0
+                    return acc
+                }, {})
+
+                if (allTx) {
+                    allTx.forEach(tx => {
+                        const amount = Number(tx.amount)
+                        if (tx.type === 'income') {
+                            totalIncome += amount
+                        } else {
+                            totalExpenses += amount
+                            // Add to daily activity if it's an expense within last 7 days
+                            if (dailyActivity[tx.date] !== undefined) {
+                                dailyActivity[tx.date] += amount
+                            }
+                        }
+                    })
+                }
+
+                setStats({
+                    income: totalIncome,
+                    expenses: totalExpenses,
+                    balance: totalIncome - totalExpenses
+                })
+
+                // Format Chart Data
+                const chartData = Object.keys(dailyActivity).map(date => {
+                    const dayName = new Date(date).toLocaleDateString('en-US', { weekday: 'short' })
+                    return { name: dayName, amount: dailyActivity[date] }
+                })
+                setActivityData(chartData)
+
+                // 2. Fetch Recent Transactions (Limit 5)
+                const { data: recentTx, error: recentError } = await supabase
+                    .from('transactions')
+                    .select('*')
+                    .eq('user_id', user.id)
+                    .order('date', { ascending: false })
+                    .limit(5)
+
+                if (recentError) throw recentError
+
+                setRecentTransactions(recentTx || [])
+
             } catch (error) {
                 console.error('Error fetching dashboard data:', error)
+            } finally {
+                setLoading(false)
             }
         }
         fetchData()
     }, [user])
-
-    const chartData = [
-        { name: 'Mon', amount: 400 },
-        { name: 'Tue', amount: 300 },
-        { name: 'Wed', amount: 200 },
-        { name: 'Thu', amount: 500 },
-        { name: 'Fri', amount: 100 },
-        { name: 'Sat', amount: 700 },
-        { name: 'Sun', amount: 300 },
-    ]
 
     return (
         <div>
@@ -71,23 +110,25 @@ const Dashboard = () => {
                             <DollarSign size={20} className="text-success" />
                         </div>
                     </div>
-                    <h2>${stats.balance.toLocaleString()}</h2>
-                    <div className="text-sm">
-                        <span className="text-success">+12%</span> from last month
-                    </div>
+                    {loading ? (
+                        <h2>...</h2>
+                    ) : (
+                        <h2 style={{ color: stats.balance >= 0 ? 'var(--text-primary)' : 'var(--danger)' }}>
+                            ${stats.balance.toLocaleString()}
+                        </h2>
+                    )}
+                    <div className="text-sm text-muted">Current net worth</div>
                 </Card>
 
                 <Card className="glass-card">
                     <div className="flex-between" style={{ marginBottom: '1rem' }}>
-                        <span className="text-muted">Monthly Income</span>
+                        <span className="text-muted">Total Income</span>
                         <div style={{ padding: '0.5rem', background: 'rgba(139, 92, 246, 0.2)', borderRadius: '8px' }}>
                             <TrendingUp size={20} style={{ color: 'var(--primary)' }} />
                         </div>
                     </div>
-                    <h2>${stats.income.toLocaleString()}</h2>
-                    <div className="text-sm">
-                        <span className="text-success">+5%</span> from last month
-                    </div>
+                    {loading ? <h2>...</h2> : <h2>${stats.income.toLocaleString()}</h2>}
+                    <div className="text-sm text-muted">Lifetime income</div>
                 </Card>
 
                 <Card className="glass-card">
@@ -97,24 +138,23 @@ const Dashboard = () => {
                             <TrendingDown size={20} className="text-danger" />
                         </div>
                     </div>
-                    <h2>${stats.expenses.toLocaleString()}</h2>
-                    <div className="text-sm">
-                        <span className="text-danger">+2%</span> from last month
-                    </div>
+                    {loading ? <h2>...</h2> : <h2>${stats.expenses.toLocaleString()}</h2>}
+                    <div className="text-sm text-muted">Lifetime spending</div>
                 </Card>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1.5rem', marginBottom: '2rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
                 {/* Chart Section */}
-                <Card title="Activity Overview">
+                <Card title="Spending Activity (Last 7 Days)">
                     <div style={{ height: '300px', width: '100%', marginTop: '1rem' }}>
                         <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={chartData}>
+                            <BarChart data={activityData}>
                                 <XAxis dataKey="name" stroke="#94a3b8" />
                                 <YAxis stroke="#94a3b8" />
                                 <Tooltip
                                     contentStyle={{ backgroundColor: '#1e293b', border: '1px solid rgba(255,255,255,0.1)' }}
                                     cursor={{ fill: 'rgba(255,255,255,0.05)' }}
+                                    formatter={(value) => [`$${value}`, 'Spending']}
                                 />
                                 <Bar dataKey="amount" fill="var(--primary)" radius={[4, 4, 0, 0]} />
                             </BarChart>
@@ -125,26 +165,32 @@ const Dashboard = () => {
                 {/* Recent Transactions */}
                 <Card title="Recent Transactions" action={<a href="/transactions" style={{ color: 'var(--primary)', fontSize: '0.9rem' }}>View All</a>}>
                     <div style={{ marginTop: '1rem' }}>
-                        {recentTransactions.map(tx => (
-                            <div key={tx.id} className="flex-between" style={{ padding: '0.75rem 0', borderBottom: '1px solid var(--glass-border)' }}>
-                                <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-                                    <div style={{
-                                        width: '40px', height: '40px', borderRadius: '50%',
-                                        background: tx.type === 'income' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-                                        display: 'flex', alignItems: 'center', justifyContent: 'center'
-                                    }}>
-                                        {tx.type === 'income' ? <TrendingUp size={18} className="text-success" /> : <TrendingDown size={18} className="text-danger" />}
+                        {loading ? (
+                            <p className="text-muted">Loading transactions...</p>
+                        ) : recentTransactions.length === 0 ? (
+                            <p className="text-muted">No recent transactions.</p>
+                        ) : (
+                            recentTransactions.map(tx => (
+                                <div key={tx.id} className="flex-between" style={{ padding: '0.75rem 0', borderBottom: '1px solid var(--glass-border)' }}>
+                                    <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                                        <div style={{
+                                            width: '40px', height: '40px', borderRadius: '50%',
+                                            background: tx.type === 'income' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                                            display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                        }}>
+                                            {tx.type === 'income' ? <TrendingUp size={18} className="text-success" /> : <TrendingDown size={18} className="text-danger" />}
+                                        </div>
+                                        <div>
+                                            <p style={{ margin: 0, fontWeight: 500 }}>{tx.title}</p>
+                                            <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)' }}>{tx.date}</p>
+                                        </div>
                                     </div>
-                                    <div>
-                                        <p style={{ margin: 0, fontWeight: 500 }}>{tx.title}</p>
-                                        <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)' }}>{tx.date}</p>
+                                    <div style={{ fontWeight: 600, color: tx.type === 'income' ? 'var(--success)' : 'var(--text-primary)' }}>
+                                        {tx.type === 'income' ? '+' : '-'}${Number(tx.amount).toFixed(2)}
                                     </div>
                                 </div>
-                                <div style={{ fontWeight: 600, color: tx.type === 'income' ? 'var(--success)' : 'var(--text-primary)' }}>
-                                    {tx.type === 'income' ? '+' : '-'}${tx.amount}
-                                </div>
-                            </div>
-                        ))}
+                            ))
+                        )}
                     </div>
                 </Card>
             </div>
